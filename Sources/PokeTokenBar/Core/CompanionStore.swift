@@ -783,7 +783,7 @@ final class CompanionStore {
         state.reconcileRepresentativeSelection()
         activeGeneration += 1
         currentLine = nil
-        state.eggUsage = 0            // 새 알은 처음부터 인큐베이션(재부화에 5M 필요)
+        state.eggUsage = 0            // 새 알은 처음부터 인큐베이션(재부화에 500K 필요)
         state.eggTier = tier          // 등급 보증(nil = 보증 없음)
         state.pendingHatchID = nil    // 새 보증으로 처음부터 롤(활성 포켓몬이 있는 동안엔 원래 비어 있다)
         prefetchedLineID = nil
@@ -1056,7 +1056,7 @@ final class CompanionStore {
         notifyCompanionEvent(shiny ? l.notifShinyDittoRevealTitle : l.notifDittoRevealTitle,
                              shiny ? l.notifShinyDittoRevealBody(disguiseName) : l.notifDittoRevealBody(disguiseName))
         save()
-        applyUsage(0)   // 이월분으로 메타몽 졸업 재평가(rare 3B라 보통 즉시 졸업 아님)
+        applyUsage(0)   // 이월분으로 메타몽 졸업 재평가(rare 300M라 보통 즉시 졸업 아님)
     }
 
     private func loadCurrentLine() async {
