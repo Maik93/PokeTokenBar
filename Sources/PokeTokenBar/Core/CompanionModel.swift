@@ -174,8 +174,19 @@ enum RareCandy {
     /// 사용 시 현재 포켓몬에 주입하는 XP(토큰 환산). 최소 진화 임계(커먼 3형태 첫 단계 12.5M)보다 작아
     /// 사탕 1개는 최대 1단계만 올린다(연쇄·졸업 폭주 없음). applyUsage 로 주입 → 이월/진화/졸업 자동.
     static let xp = 10_000_000
-    /// 주간 한도 100% 도달 시 지급 개수(세션급은 1개).
-    static let weeklyGrant = 5
+    /// 사탕 지급 임계(창 utilization %, 오름차순) — 창이 각 값을 **새로 넘어서는** 순간 1회씩 지급.
+    /// 100%만이 아니라 사용이 쌓이는 도중에도 보상해 사탕이 "빨리 도착"하게 한다. 한 refresh 에서
+    /// 여러 임계를 한꺼번에 넘으면 그 사이 임계들의 지급분을 합산한다(evaluateCandyGrants).
+    static let grantThresholds: [Double] = [40, 80, 100]
+    /// 임계별 지급 개수 — `grantThresholds` 와 같은 길이·순서. 세션급 창 / 주간급 창.
+    /// 주간 누계 10개(2+3+5)는 세대(졸업) 속도를 크게 흔들지 않는 선에서 "빨리 자란다"를 만든다.
+    static let sessionThresholdGrants = [1, 1, 1]
+    static let weeklyThresholdGrants  = [2, 3, 5]
+
+    /// 창 분류별 임계 지급표.
+    static func thresholdGrants(for kind: WindowClass) -> [Int] {
+        kind == .weekly ? weeklyThresholdGrants : sessionThresholdGrants
+    }
     /// 상점 구매가(재화 = 사용한 토큰: usedSinceInstall − spentTokens). XP 값어치(10M)의 5배.
     /// 토큰이 "성장 미터 + 상점 지갑"으로 이중 사용되는 구조라, 가격을 XP 와 같게 두면 구매가 사실상
     /// 공짜 추가성장(15M 써서 25M 성장)이 된다. 50M 로 두면 그 값 모으는 50M 패시브 성장 + 사탕
@@ -241,14 +252,14 @@ enum ShopEntry: Hashable, Sendable {
     }
 }
 
-/// 사탕 지급 대상 한도 창의 분류 — session=1개·weekly=weeklyGrant.
+/// 사탕 지급 대상 한도 창의 분류 — 임계별 지급표가 갈린다(`RareCandy.thresholdGrants(for:)`).
 enum WindowClass: Sendable { case session, weekly }
 
 /// 사탕 지급 판정 입력 — 프로바이더 무관 한도 창 1개. (UsageStore.candyEligibleWindows 가 생성)
 struct CandyWindow: Sendable {
     let key: String          // 안정 식별자(tier 추적) — resets_at 등 휘발 필드 금지
     let name: String         // 표시용(알림 "왜 받는지")
-    let kind: WindowClass    // session=1개 · weekly=5개
+    let kind: WindowClass    // 임계별 지급 개수 결정
     let utilization: Double  // 0~100+
 }
 
@@ -257,6 +268,7 @@ struct CandyGrant: Equatable, Sendable {
     let windowKey: String
     let windowName: String   // 알림 "왜 받는지"
     let count: Int
+    let milestonePercent: Int  // 이 지급으로 새로 도달한 가장 높은 임계(알림 문구 — 40·80·100%)
 }
 
 /// 현재 서비스가 제공하는 움직이는 포켓몬 스프라이트 범위.
@@ -566,9 +578,9 @@ struct CompanionState: Codable, Sendable {
     var language: AppLanguage = .systemDefault   // 신규 설치 = 시스템 로케일
     // 인벤토리 (ItemKind.rawValue → 개수)
     var inventory: [String: Int] = [:]
-    // 사탕 지급 엣지 상태(창 key → 지급한 tier). ★영속 — notifiedTier(인메모리)와 달리 재시작 무한지급 방지.
+    // 사탕 지급 엣지 상태(창 key → 넘은 임계 개수 0…3). ★영속 — notifiedTier(인메모리)와 달리 재시작 무한지급 방지.
     var candyGrantTier: [String: Int] = [:]
-    // 사탕 지급 첫 실행 시드 완료 — 업데이트 직후 이미 100%였던 창의 소급 지급 차단.
+    // 사탕 지급 첫 실행 시드 완료 — 업데이트 직후 이미 임계(40·80·100%) 위였던 창의 소급 지급 차단.
     var candyFeatureSeeded = false
 
     init() {}

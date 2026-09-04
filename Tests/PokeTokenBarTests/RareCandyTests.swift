@@ -30,53 +30,106 @@ private struct RCLineThrows: PokeProviding {
 
 @MainActor
 final class CandyGrantEvaluationTests: XCTestCase {
-    func testSessionGrantsOne() {
+    // 임계 [40, 80, 100] — 세션 [1,1,1], 주간 [2,3,5].
+
+    /// 첫 임계(40%)를 넘으면 세션 1개·tier 1.
+    func testSessionFirstThresholdGrantsOne() {
         var tier: [String: Int] = [:]
-        let grants = CompanionStore.evaluateCandyGrants(windows: [w("s", .session, 100)], grantTier: &tier)
+        let grants = CompanionStore.evaluateCandyGrants(windows: [w("s", .session, 40)], grantTier: &tier)
         XCTAssertEqual(grants.map(\.count), [1])
+        XCTAssertEqual(grants.first?.milestonePercent, 40)
         XCTAssertEqual(tier["s"], 1)
     }
 
-    func testWeeklyGrantsFive() {
+    /// 세션 창을 처음부터 100%로 — 세 임계를 한 번에 넘어 1+1+1=3, milestone 100.
+    func testSessionAllThresholdsAtOnce() {
         var tier: [String: Int] = [:]
-        let grants = CompanionStore.evaluateCandyGrants(windows: [w("wk", .weekly, 100)], grantTier: &tier)
-        XCTAssertEqual(grants.map(\.count), [RareCandy.weeklyGrant])
+        let grants = CompanionStore.evaluateCandyGrants(windows: [w("s", .session, 100)], grantTier: &tier)
+        XCTAssertEqual(grants.map(\.count), [3])
+        XCTAssertEqual(grants.first?.milestonePercent, 100)
+        XCTAssertEqual(tier["s"], 3)
     }
 
-    func testBelow100NoGrant() {
+    /// 주간 창 100% — 2+3+5=10.
+    func testWeeklyAllThresholdsGrantTen() {
         var tier: [String: Int] = [:]
-        let grants = CompanionStore.evaluateCandyGrants(windows: [w("s", .session, 99.9)], grantTier: &tier)
+        let grants = CompanionStore.evaluateCandyGrants(windows: [w("wk", .weekly, 100)], grantTier: &tier)
+        XCTAssertEqual(grants.map(\.count), [10])
+        XCTAssertEqual(tier["wk"], 3)
+    }
+
+    /// 임계를 하나씩 넘을 때마다 그 임계 몫만 지급(주간 2 → 3 → 5).
+    func testWeeklyGrantsPerThresholdStep() {
+        var tier: [String: Int] = [:]
+        XCTAssertEqual(CompanionStore.evaluateCandyGrants(windows: [w("wk", .weekly, 45)], grantTier: &tier).map(\.count), [2])
+        XCTAssertEqual(CompanionStore.evaluateCandyGrants(windows: [w("wk", .weekly, 82)], grantTier: &tier).map(\.count), [3])
+        XCTAssertEqual(CompanionStore.evaluateCandyGrants(windows: [w("wk", .weekly, 100)], grantTier: &tier).map(\.count), [5])
+        // 총합 = 10, 재호출은 지급 없음
+        XCTAssertTrue(CompanionStore.evaluateCandyGrants(windows: [w("wk", .weekly, 100)], grantTier: &tier).isEmpty)
+    }
+
+    /// 40% 미만은 지급 없음(최저 임계 아래).
+    func testBelowLowestThresholdNoGrant() {
+        var tier: [String: Int] = [:]
+        let grants = CompanionStore.evaluateCandyGrants(windows: [w("s", .session, 39.9)], grantTier: &tier)
         XCTAssertTrue(grants.isEmpty)
         XCTAssertNil(tier["s"])
     }
 
     /// 같은 tier 유지 중엔 재지급 안 함(80·81·84… 억제의 사탕 버전).
-    func testNoDoubleGrantWhileAt100() {
+    func testNoDoubleGrantWhileWithinTier() {
         var tier: [String: Int] = [:]
-        _ = CompanionStore.evaluateCandyGrants(windows: [w("s", .session, 100)], grantTier: &tier)
-        let again = CompanionStore.evaluateCandyGrants(windows: [w("s", .session, 100)], grantTier: &tier)
-        XCTAssertTrue(again.isEmpty, "이미 지급한 창은 재지급 안 함")
+        _ = CompanionStore.evaluateCandyGrants(windows: [w("s", .session, 85)], grantTier: &tier)
+        let again = CompanionStore.evaluateCandyGrants(windows: [w("s", .session, 88)], grantTier: &tier)
+        XCTAssertTrue(again.isEmpty, "같은 임계 구간 재평가는 재지급 안 함")
     }
 
-    /// 100% 아래로 내려가면 재무장(맵에서 제거) → 다시 채우면 재지급.
-    func testRearmAfterDropBelow100() {
+    /// [회귀 — A||B 게이트의 B 단독] tier 하강(창 리셋 진행)은 지급 없이 tier 만 낮춰 재무장.
+    /// 40% 미만까지는 안 갔으니 맵에서 제거되지 않는다(부분 재무장).
+    func testTierDownReArmsWithoutGrant() {
+        var tier: [String: Int] = [:]
+        _ = CompanionStore.evaluateCandyGrants(windows: [w("s", .session, 100)], grantTier: &tier)   // tier 3
+        let down = CompanionStore.evaluateCandyGrants(windows: [w("s", .session, 55)], grantTier: &tier)
+        XCTAssertTrue(down.isEmpty, "하강은 지급 없음")
+        XCTAssertEqual(tier["s"], 1, "55% → 임계 1개만 넘음 (부분 재무장)")
+        let back = CompanionStore.evaluateCandyGrants(windows: [w("s", .session, 100)], grantTier: &tier)
+        XCTAssertEqual(back.map(\.count), [2], "80·100 재도달분만 (40 은 tier 1 로 유지 중이라 제외)")
+    }
+
+    /// 최저 임계 아래로 완전히 내려가면 맵에서 제거 → 다시 채우면 전량 재지급.
+    func testFullRearmAfterDropBelowLowestThreshold() {
         var tier: [String: Int] = [:]
         _ = CompanionStore.evaluateCandyGrants(windows: [w("s", .session, 100)], grantTier: &tier)
-        _ = CompanionStore.evaluateCandyGrants(windows: [w("s", .session, 40)], grantTier: &tier)
-        XCTAssertNil(tier["s"], "경고선 아래 → 제거(재무장)")
+        _ = CompanionStore.evaluateCandyGrants(windows: [w("s", .session, 10)], grantTier: &tier)
+        XCTAssertNil(tier["s"], "최저 임계 아래 → 제거(재무장)")
         let regrant = CompanionStore.evaluateCandyGrants(windows: [w("s", .session, 100)], grantTier: &tier)
-        XCTAssertEqual(regrant.map(\.count), [1], "리셋 후 다시 채우면 재지급")
+        XCTAssertEqual(regrant.map(\.count), [3], "리셋 후 다시 채우면 전량 재지급")
     }
 
-    /// 세션+주간+미달 혼합 — 세션 1 + 주간 5, 미달 창은 무시.
+    /// 세이브 병합으로 들어온 stale 큰 tier(구버전 "1"=100% 도달 등, 혹은 임의 큰 값)는 임계 개수로 클램프.
+    func testStaleTierClampedToThresholdCount() {
+        var tier: [String: Int] = ["s": 99]   // 병합 산물
+        let grants = CompanionStore.evaluateCandyGrants(windows: [w("s", .session, 100)], grantTier: &tier)
+        XCTAssertTrue(grants.isEmpty, "이미 최고 tier 로 간주 → 재지급 없음")
+        XCTAssertEqual(tier["s"], 3, "임계 개수로 정규화")
+    }
+
+    /// 세션+주간+40% 미달 혼합 — 세션 3 + 주간 10, 미달 창은 무시.
     func testMixedWindows() {
         var tier: [String: Int] = [:]
         let grants = CompanionStore.evaluateCandyGrants(windows: [
             w("claude.fiveHour", .session, 100),
             w("claude.sevenDay", .weekly, 100),
-            w("codex.codex.primary", .session, 50),
+            w("codex.codex.primary", .session, 30),
         ], grantTier: &tier)
-        XCTAssertEqual(grants.reduce(0) { $0 + $1.count }, 1 + RareCandy.weeklyGrant)
+        XCTAssertEqual(grants.reduce(0) { $0 + $1.count }, 3 + 10)
+    }
+
+    /// [불변식] 지급표 길이 = 임계 개수 — 한쪽만 늘리면 슬라이스 범위 초과로 크래시.
+    func testThresholdTablesMatchThresholdCount() {
+        XCTAssertEqual(RareCandy.sessionThresholdGrants.count, RareCandy.grantThresholds.count)
+        XCTAssertEqual(RareCandy.weeklyThresholdGrants.count, RareCandy.grantThresholds.count)
+        XCTAssertEqual(RareCandy.grantThresholds, RareCandy.grantThresholds.sorted(), "오름차순")
     }
 
     /// 지급 grant 는 발화 창 이름을 담는다(알림 "왜 받는지").
@@ -129,23 +182,24 @@ final class RareCandyStoreTests: XCTestCase {
         return CompanionStore(provider: StubProvider(value: line), clock: { rcNow }, fileURL: url, rng: SeededRNG(seed: seed))
     }
 
-    /// 시드+지급 헬퍼 — 빈 창으로 시드 완료 후, 유니크 세션 창을 100%로 올려 n개 지급.
+    /// 시드+지급 헬퍼 — 빈 창으로 시드 완료 후, 유니크 세션 창을 첫 임계(40%)만 넘겨 정확히 n개 지급.
+    /// (세션 임계표 [1,1,1] 이라 40% 한 칸 = 1개.)
     private func giveCandies(_ s: CompanionStore, _ n: Int) {
         s.grantCandies(from: [], limitsReady: true)   // 시드(지급 0)
         for i in 0..<n {
-            s.grantCandies(from: [w("test.session.\(i)", .session, 100)], limitsReady: true)
+            s.grantCandies(from: [w("test.session.\(i)", .session, 40)], limitsReady: true)
         }
     }
 
     // MARK: 지급
 
-    /// 첫 실행: 이미 100%인 창은 소급 지급 안 하고 tier 시드만(candyFeatureSeeded=true).
+    /// 첫 실행: 이미 임계 위인 창은 소급 지급 안 하고 tier 시드만(candyFeatureSeeded=true).
     func testFirstRunSeedsWithoutGranting() {
         let s = store(rcLinear3)
         s.grantCandies(from: [w("claude.fiveHour", .session, 100)], limitsReady: true)
-        XCTAssertEqual(s.rareCandyCount, 0, "첫 실행 100% 창은 소급 지급 안 함")
+        XCTAssertEqual(s.rareCandyCount, 0, "첫 실행 임계 위 창은 소급 지급 안 함")
         XCTAssertTrue(s.state.candyFeatureSeeded)
-        XCTAssertEqual(s.state.candyGrantTier["claude.fiveHour"], 1, "tier 시드됨")
+        XCTAssertEqual(s.state.candyGrantTier["claude.fiveHour"], 3, "tier 시드됨(세 임계 모두 위)")
     }
 
     /// 시드 후 같은 창이 계속 100%여도 재지급 없음.
@@ -164,20 +218,29 @@ final class RareCandyStoreTests: XCTestCase {
         XCTAssertEqual(s.rareCandyCount, 0)
     }
 
-    /// 시드 후 새 창이 100%를 새로 넘으면 지급 — 세션 1개.
+    /// 시드 후 새 창이 100%를 새로 넘으면 지급 — 세션 3개(1+1+1).
     func testSessionGrantAfterSeed() {
         let s = store(rcLinear3)
         s.grantCandies(from: [], limitsReady: true)   // 시드
         s.grantCandies(from: [w("claude.fiveHour", .session, 100)], limitsReady: true)
-        XCTAssertEqual(s.rareCandyCount, 1)
+        XCTAssertEqual(s.rareCandyCount, 3)
     }
 
-    /// 주간 창은 5개.
-    func testWeeklyGrantsFiveCandies() {
+    /// 시드 후 첫 임계(40%)만 넘으면 세션 1개.
+    func testSessionFirstThresholdGrantsOneCandy() {
+        let s = store(rcLinear3)
+        s.grantCandies(from: [], limitsReady: true)
+        s.grantCandies(from: [w("claude.fiveHour", .session, 45)], limitsReady: true)
+        XCTAssertEqual(s.rareCandyCount, 1)
+        XCTAssertEqual(s.state.candyGrantTier["claude.fiveHour"], 1)
+    }
+
+    /// 주간 창은 100%에서 10개(2+3+5).
+    func testWeeklyGrantsTenCandies() {
         let s = store(rcLinear3)
         s.grantCandies(from: [], limitsReady: true)
         s.grantCandies(from: [w("claude.sevenDay", .weekly, 100)], limitsReady: true)
-        XCTAssertEqual(s.rareCandyCount, RareCandy.weeklyGrant)
+        XCTAssertEqual(s.rareCandyCount, 10)
     }
 
     /// [핵심 회귀] 지급 tier 는 영속 — 재시작(같은 파일 재로드) 후 같은 100% 창이 재지급되지 않는다.
@@ -186,27 +249,27 @@ final class RareCandyStoreTests: XCTestCase {
         let url = FileManager.default.temporaryDirectory.appendingPathComponent("rc-persist-\(UUID().uuidString).json")
         let s1 = CompanionStore(provider: StubProvider(value: rcLinear3), clock: { rcNow }, fileURL: url, rng: SeededRNG(seed: 1))
         s1.grantCandies(from: [], limitsReady: true)                                        // 시드
-        s1.grantCandies(from: [w("claude.fiveHour", .session, 100)], limitsReady: true)     // 지급 1
-        XCTAssertEqual(s1.rareCandyCount, 1)
+        s1.grantCandies(from: [w("claude.fiveHour", .session, 100)], limitsReady: true)     // 지급 3
+        XCTAssertEqual(s1.rareCandyCount, 3)
 
         // 재시작: 같은 파일 로드
         let s2 = CompanionStore(provider: StubProvider(value: rcLinear3), clock: { rcNow }, fileURL: url, rng: SeededRNG(seed: 1))
-        XCTAssertEqual(s2.rareCandyCount, 1, "인벤토리 영속")
-        XCTAssertEqual(s2.state.candyGrantTier["claude.fiveHour"], 1, "tier 영속")
+        XCTAssertEqual(s2.rareCandyCount, 3, "인벤토리 영속")
+        XCTAssertEqual(s2.state.candyGrantTier["claude.fiveHour"], 3, "tier 영속")
         // 여전히 100%인 같은 창 → 재지급 없어야 함
         s2.grantCandies(from: [w("claude.fiveHour", .session, 100)], limitsReady: true)
-        XCTAssertEqual(s2.rareCandyCount, 1, "재시작 후 같은 100% 창의 재지급 금지(무한지급 익스플로잇 차단)")
+        XCTAssertEqual(s2.rareCandyCount, 3, "재시작 후 같은 100% 창의 재지급 금지(무한지급 익스플로잇 차단)")
     }
 
-    /// [회귀] 재무장(100%→아래로)으로 grantTier 에서 제거된 것이 영속돼야 재시작 후 지급 누락이 없다.
+    /// [회귀] 재무장(최저 임계 아래로)으로 grantTier 에서 제거된 것이 영속돼야 재시작 후 지급 누락이 없다.
     /// 지급 없이 재무장만 발생한 경우에도 save() 돼야 한다(과거: grants 비면 save 스킵 → stale tier 잔존).
     func testRearmPersistsAcrossRestart() {
         let url = FileManager.default.temporaryDirectory.appendingPathComponent("rc-rearm-\(UUID().uuidString).json")
         let s1 = CompanionStore(provider: StubProvider(value: rcLinear3), clock: { rcNow }, fileURL: url, rng: SeededRNG(seed: 1))
         s1.grantCandies(from: [], limitsReady: true)                                      // 시드
-        s1.grantCandies(from: [w("claude.fiveHour", .session, 100)], limitsReady: true)   // 지급 1 (tier=1)
-        XCTAssertEqual(s1.rareCandyCount, 1)
-        s1.grantCandies(from: [w("claude.fiveHour", .session, 40)], limitsReady: true)    // 재무장(제거) — 지급 0
+        s1.grantCandies(from: [w("claude.fiveHour", .session, 100)], limitsReady: true)   // 지급 3 (tier=3)
+        XCTAssertEqual(s1.rareCandyCount, 3)
+        s1.grantCandies(from: [w("claude.fiveHour", .session, 10)], limitsReady: true)    // 재무장(제거) — 지급 0
         XCTAssertNil(s1.state.candyGrantTier["claude.fiveHour"])
 
         // 재시작: 재무장이 영속됐어야 함
@@ -214,7 +277,22 @@ final class RareCandyStoreTests: XCTestCase {
         XCTAssertNil(s2.state.candyGrantTier["claude.fiveHour"], "재무장이 영속돼야 함")
         // 다시 100% → 재지급(누락 없음)
         s2.grantCandies(from: [w("claude.fiveHour", .session, 100)], limitsReady: true)
-        XCTAssertEqual(s2.rareCandyCount, 2, "재무장 후 재도달은 재지급돼야 함(지급 누락 회귀 방지)")
+        XCTAssertEqual(s2.rareCandyCount, 6, "재무장 후 재도달은 재지급돼야 함(지급 누락 회귀 방지)")
+    }
+
+    /// [회귀 — 부분 재무장 영속] tier 하강(리셋 진행 중, 최저 임계 위)도 재시작 후 재도달분만 지급.
+    func testPartialTierDownPersistsAcrossRestart() {
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("rc-partial-\(UUID().uuidString).json")
+        let s1 = CompanionStore(provider: StubProvider(value: rcLinear3), clock: { rcNow }, fileURL: url, rng: SeededRNG(seed: 1))
+        s1.grantCandies(from: [], limitsReady: true)
+        s1.grantCandies(from: [w("claude.sevenDay", .weekly, 100)], limitsReady: true)   // 10 (tier 3)
+        s1.grantCandies(from: [w("claude.sevenDay", .weekly, 50)], limitsReady: true)    // 하강 → tier 1
+        XCTAssertEqual(s1.state.candyGrantTier["claude.sevenDay"], 1)
+
+        let s2 = CompanionStore(provider: StubProvider(value: rcLinear3), clock: { rcNow }, fileURL: url, rng: SeededRNG(seed: 1))
+        XCTAssertEqual(s2.state.candyGrantTier["claude.sevenDay"], 1, "부분 재무장 영속")
+        s2.grantCandies(from: [w("claude.sevenDay", .weekly, 100)], limitsReady: true)   // 80·100 재도달분 = 3+5
+        XCTAssertEqual(s2.rareCandyCount, 10 + 8)
     }
 
     // MARK: 사용
@@ -507,77 +585,87 @@ final class RareCandyGrantIntegrationTests: XCTestCase {
 
     // MARK: 통합 — 한도 100% → 지급
 
-    /// [핵심] 시드된 상태에서 Claude 5h 100% 도달 → 세션 사탕 1개(수동으로 못 여는 경로 검증).
-    func testClaudeSessionLimitGrantsOneCandy() async {
+    /// [핵심] 시드된 상태에서 Claude 5h 100% 도달 → 세션 사탕 3개(1+1+1, 수동으로 못 여는 경로 검증).
+    func testClaudeSessionLimitGrantsThreeCandies() async {
         let c = companion()
-        c.grantCandies(from: [], limitsReady: true)   // 시드(현재 100% 창 없음)
+        c.grantCandies(from: [], limitsReady: true)   // 시드(현재 임계 위 창 없음)
         let store = usage(claude: rcClaude(fiveHour: 100))
+        await store.refresh(scheduleEmptyRetry: false)
+        c.grantCandies(from: store.candyEligibleWindows, limitsReady: store.limitsReady)
+        XCTAssertEqual(c.rareCandyCount, 3)
+    }
+
+    /// 시드된 상태에서 Claude 5h 가 첫 임계(40%)만 넘음 → 세션 1개.
+    func testClaudeSessionFirstThresholdGrantsOne() async {
+        let c = companion()
+        c.grantCandies(from: [], limitsReady: true)
+        let store = usage(claude: rcClaude(fiveHour: 42))
         await store.refresh(scheduleEmptyRetry: false)
         c.grantCandies(from: store.candyEligibleWindows, limitsReady: store.limitsReady)
         XCTAssertEqual(c.rareCandyCount, 1)
     }
 
-    /// 주간 100% → 5개.
-    func testClaudeWeeklyLimitGrantsFive() async {
+    /// 주간 100% → 10개(2+3+5).
+    func testClaudeWeeklyLimitGrantsTen() async {
         let c = companion()
         c.grantCandies(from: [], limitsReady: true)
         let store = usage(claude: rcClaude(sevenDay: 100))
         await store.refresh(scheduleEmptyRetry: false)
         c.grantCandies(from: store.candyEligibleWindows, limitsReady: store.limitsReady)
-        XCTAssertEqual(c.rareCandyCount, RareCandy.weeklyGrant)
+        XCTAssertEqual(c.rareCandyCount, 10)
     }
 
-    /// 세션+주간 동시 100% → 1 + 5.
-    func testSessionAndWeeklyTogetherGrantSix() async {
+    /// 세션+주간 동시 100% → 3 + 10.
+    func testSessionAndWeeklyTogetherGrantThirteen() async {
         let c = companion()
         c.grantCandies(from: [], limitsReady: true)
         let store = usage(claude: rcClaude(fiveHour: 100, sevenDay: 100))
         await store.refresh(scheduleEmptyRetry: false)
         c.grantCandies(from: store.candyEligibleWindows, limitsReady: store.limitsReady)
-        XCTAssertEqual(c.rareCandyCount, 1 + RareCandy.weeklyGrant)
+        XCTAssertEqual(c.rareCandyCount, 3 + 10)
     }
 
-    /// Codex 세션(primary) 100% → 1개(전 프로바이더 지급).
-    func testCodexPrimaryLimitGrantsOne() async {
+    /// Codex 세션(primary) 100% → 3개(전 프로바이더 지급).
+    func testCodexPrimaryLimitGrantsThree() async {
         let c = companion()
         c.grantCandies(from: [], limitsReady: true)
         let store = usage(codex: rcCodex(primary: 100),
                           providers: [RCFakeProvider(id: "codex", displayName: "Codex", daily: rcDaily(1_000))])
         await store.refresh(scheduleEmptyRetry: false)
         c.grantCandies(from: store.candyEligibleWindows, limitsReady: store.limitsReady)
-        XCTAssertEqual(c.rareCandyCount, 1)
+        XCTAssertEqual(c.rareCandyCount, 3)
     }
 
-    /// 99.9% 는 지급 없음(엄격히 100% 이상).
-    func testJustUnder100NoGrant() async {
+    /// 최저 임계(40%) 바로 아래는 지급 없음.
+    func testJustUnderLowestThresholdNoGrant() async {
         let c = companion()
         c.grantCandies(from: [], limitsReady: true)
-        let store = usage(claude: rcClaude(fiveHour: 99.9))
+        let store = usage(claude: rcClaude(fiveHour: 39.9))
         await store.refresh(scheduleEmptyRetry: false)
         c.grantCandies(from: store.candyEligibleWindows, limitsReady: store.limitsReady)
         XCTAssertEqual(c.rareCandyCount, 0)
     }
 
-    /// 첫 실행(미시드) + 이미 100% → 소급 지급 안 함(시드만).
-    func testFirstRunAt100SeedsNoGrant() async {
+    /// 첫 실행(미시드) + 이미 임계 위 → 소급 지급 안 함(시드만).
+    func testFirstRunAboveThresholdSeedsNoGrant() async {
         let c = companion()   // candyFeatureSeeded=false
         let store = usage(claude: rcClaude(fiveHour: 100))
         await store.refresh(scheduleEmptyRetry: false)
         c.grantCandies(from: store.candyEligibleWindows, limitsReady: store.limitsReady)
-        XCTAssertEqual(c.rareCandyCount, 0, "업데이트 직후 이미 100%인 창은 소급 지급 안 함")
+        XCTAssertEqual(c.rareCandyCount, 0, "업데이트 직후 이미 임계 위인 창은 소급 지급 안 함")
         XCTAssertTrue(c.state.candyFeatureSeeded)
         c.grantCandies(from: store.candyEligibleWindows, limitsReady: store.limitsReady)
         XCTAssertEqual(c.rareCandyCount, 0, "시드된 창은 재호출에도 지급 없음")
     }
 
-    /// 지급은 엣지 1회 — 같은 100% 창을 여러 refresh 에 반복 평가해도 1개만.
-    func testRepeatedRefreshGrantsOnce() async {
+    /// 지급은 임계당 엣지 1회 — 같은 100% 창을 여러 refresh 에 반복 평가해도 3개(1+1+1)뿐.
+    func testRepeatedRefreshGrantsEachThresholdOnce() async {
         let c = companion()
         c.grantCandies(from: [], limitsReady: true)
         let store = usage(claude: rcClaude(fiveHour: 100))
         await store.refresh(scheduleEmptyRetry: false)
         for _ in 0..<5 { c.grantCandies(from: store.candyEligibleWindows, limitsReady: store.limitsReady) }
-        XCTAssertEqual(c.rareCandyCount, 1, "여러 번 호출해도 엣지 1회만")
+        XCTAssertEqual(c.rareCandyCount, 3, "여러 번 호출해도 임계마다 엣지 1회만")
     }
 
     /// 지급 알림 대상 창 이름이 세션/주간 모두 candyEligibleWindows 에 실제로 담기는지(본문 "왜 받는지").
@@ -610,34 +698,34 @@ final class RareCandyGrantIntegrationTests: XCTestCase {
         XCTAssertTrue(store.candyEligibleWindows.isEmpty, "utilization nil → 지급 창 아님")
     }
 
-    /// 사탕 임계(100)와 알림 임계(crit 95)는 분리 — 97%는 경고는 켜지되 사탕은 지급 0.
-    /// (두 임계가 리팩터에서 조용히 수렴하지 않도록 잠금.)
+    /// 사탕 임계(최저 40)와 알림 임계(crit 95)는 분리 — 리팩터에서 조용히 수렴하지 않도록 잠금.
+    /// 42%: 사탕은 지급되되(첫 임계) 한도 경고는 아직 꺼져 있다.
     func testCandyThresholdSeparateFromAlertThreshold() async {
         let c = companion()
-        c.grantCandies(from: [], limitsReady: true)   // 시드(현재 100% 없음)
-        let store = usage(claude: rcClaude(fiveHour: 97))
+        c.grantCandies(from: [], limitsReady: true)   // 시드(현재 임계 위 없음)
+        let store = usage(claude: rcClaude(fiveHour: 42))
         await store.refresh(scheduleEmptyRetry: false)
-        XCTAssertTrue(store.isLimitWarning, "97% ≥ crit 95 → 한도 경고 켜짐")
+        XCTAssertFalse(store.isLimitWarning, "42% < warn → 한도 경고 꺼짐")
         c.grantCandies(from: store.candyEligibleWindows, limitsReady: store.limitsReady)
-        XCTAssertEqual(c.rareCandyCount, 0, "97% < 사탕 임계 100 → 지급 없음")
+        XCTAssertEqual(c.rareCandyCount, 1, "42% ≥ 사탕 최저 임계 40 → 첫 임계 지급")
     }
 
     /// [문서화된 한계 잠금] 첫 시드에 한 프로바이더만 로드되면 그 프로바이더만 시드된다.
-    /// 이후 늦게 등장한 프로바이더가 이미 100%면 소급 지급된다(정상 경로는 둘 다 await 후라 원자적).
+    /// 이후 늦게 등장한 프로바이더가 이미 임계 위면 소급 지급된다(정상 경로는 둘 다 await 후라 원자적).
     /// 이 동작을 잠가, 향후 "수정"이 의식적 선택이 되게 한다.
     func testStaggeredProviderSeedRetroactiveGrant() async {
         let c = companion()
-        let claudeStore = usage(claude: rcClaude(fiveHour: 50))   // 시드 시점 Claude 는 100 아님
+        let claudeStore = usage(claude: rcClaude(fiveHour: 50))   // 시드 시점 Claude 는 tier 1(≥40)
         await claudeStore.refresh(scheduleEmptyRetry: false)
         c.grantCandies(from: claudeStore.candyEligibleWindows, limitsReady: claudeStore.limitsReady)  // 시드(Claude만)
         XCTAssertTrue(c.state.candyFeatureSeeded)
         XCTAssertEqual(c.rareCandyCount, 0)
-        // 이후: Codex 가 이미 100% 인 채 처음 등장 → 시드 안 돼 소급 지급
+        // 이후: Codex 가 이미 100% 인 채 처음 등장 → 시드 안 돼 소급 지급(세 임계 = 3)
         let codexStore = usage(codex: rcCodex(primary: 100),
                                providers: [RCFakeProvider(id: "codex", displayName: "Codex", daily: rcDaily(1_000))])
         await codexStore.refresh(scheduleEmptyRetry: false)
         c.grantCandies(from: codexStore.candyEligibleWindows, limitsReady: codexStore.limitsReady)
-        XCTAssertEqual(c.rareCandyCount, 1, "문서화된 한계: 늦게 등장한 100% 창은 소급 지급됨")
+        XCTAssertEqual(c.rareCandyCount, 3, "문서화된 한계: 늦게 등장한 임계 위 창은 소급 지급됨")
     }
 }
 
@@ -657,10 +745,22 @@ final class CandyNotificationCopyTests: XCTestCase {
     /// 본문은 넘겨받은 창 이름을 그대로 앞에 붙인다 — Claude·Codex 어느 창이든 자연스럽게 뜬다.
     func testBodyPrefixesWindowNameClaudeAndCodex() {
         let l = L(.ko)
-        XCTAssertTrue(l.notifCandyBody(window: "Claude 5시간 세션").hasPrefix("Claude 5시간 세션 토큰 한도를 다 채웠"))
-        XCTAssertTrue(l.notifCandyBody(window: "Claude 주간").hasPrefix("Claude 주간 토큰 한도를 다 채웠"))
-        XCTAssertTrue(l.notifCandyBody(window: "Codex 5시간 세션").hasPrefix("Codex 5시간 세션 토큰 한도를 다 채웠"))
-        XCTAssertTrue(l.notifCandyBody(window: "Codex 주간").hasPrefix("Codex 주간 토큰 한도를 다 채웠"))
+        XCTAssertTrue(l.notifCandyBody(window: "Claude 5시간 세션", percent: 100).hasPrefix("Claude 5시간 세션 토큰 한도를 다 채웠"))
+        XCTAssertTrue(l.notifCandyBody(window: "Claude 주간", percent: 100).hasPrefix("Claude 주간 토큰 한도를 다 채웠"))
+        XCTAssertTrue(l.notifCandyBody(window: "Codex 5시간 세션", percent: 100).hasPrefix("Codex 5시간 세션 토큰 한도를 다 채웠"))
+        XCTAssertTrue(l.notifCandyBody(window: "Codex 주간", percent: 100).hasPrefix("Codex 주간 토큰 한도를 다 채웠"))
+    }
+
+    /// 100% 미만 임계는 "다 채웠다"가 아니라 진행률(%)을 담는다.
+    func testBodyBelow100CarriesPercent() {
+        for lang in AppLanguage.allCases {
+            let l = L(lang)
+            let body40 = l.notifCandyBody(window: "Claude 주간", percent: 40)
+            let body80 = l.notifCandyBody(window: "Claude 주간", percent: 80)
+            XCTAssertTrue(body40.contains("40"), "\(lang): \(body40)")
+            XCTAssertTrue(body80.contains("80"), "\(lang): \(body80)")
+            XCTAssertTrue(body40.contains("Claude 주간"), "\(lang): \(body40)")
+        }
     }
 
     /// 3개 언어 모두 개수 치환 + 비어있지 않음.
