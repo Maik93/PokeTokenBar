@@ -622,13 +622,13 @@ struct L {
     var eggImminent: String { t("곧 부화해요!", "About to hatch!", "もうすぐ孵化！", "¡Está a punto de eclosionar!", "Sur le point d'éclore !", "Está quase chocando!", "Schlüpft gleich!") }
     /// 첫 실행(아직 토큰 적립 0) 안내 — "왜 아무 일도 안 일어나지"를 방지.
     var eggFirstRunHint: String {
-        t("로컬 AI 코딩 도구의 사용량으로 자라요. 약 5M 토큰을 쓰면 알이 부화해요.",
-          "Grows from your local AI coding usage. Your egg hatches after ~5M tokens.",
-          "ローカルの AI コーディング使用量で育ちます。約5Mトークンでタマゴが孵化します。",
-          "Crece con el uso de tus herramientas locales de programación con IA. Tu huevo eclosiona tras unos 5M de tokens.",
-          "Il grandit avec l'usage de tes outils de code IA locaux. Ton œuf éclôt après environ 5M de tokens.",
-          "Cresce com o uso das suas ferramentas locais de programação com IA. O ovo choca depois de uns 5M de tokens.",
-          "Wächst mit der Nutzung deiner lokalen KI-Coding-Tools. Nach etwa 5M Tokens schlüpft dein Ei.") }
+        t("로컬 AI 코딩 도구의 사용량으로 자라요. 약 500K 토큰을 쓰면 알이 부화해요.",
+          "Grows from your local AI coding usage. Your egg hatches after ~500K tokens.",
+          "ローカルの AI コーディング使用量で育ちます。約500Kトークンでタマゴが孵化します。",
+          "Crece con el uso de tus herramientas locales de programación con IA. Tu huevo eclosiona tras unos 500K de tokens.",
+          "Il grandit avec l'usage de tes outils de code IA locaux. Ton œuf éclôt après environ 500K de tokens.",
+          "Cresce com o uso das suas ferramentas locais de programação com IA. O ovo choca depois de uns 500K de tokens.",
+          "Wächst mit der Nutzung deiner lokalen KI-Coding-Tools. Nach etwa 500K Tokens schlüpft dein Ei.") }
     var notifEvolveTitle: String { t("✨ 진화!", "✨ Evolved!", "✨ 進化！", "✨ ¡Evolucionó!", "✨ Évolution !", "✨ Evoluiu!", "✨ Entwicklung!") }
     func notifEvolveBody(_ name: String) -> String { t("\(name)(으)로 진화했어요!", "Evolved into \(name)!", "\(name) に進化しました！", "¡Evolucionó a \(name)!", "A évolué en \(name) !", "Evoluiu para \(name)!", "Hat sich zu \(name) entwickelt!") }
     // 메타몽 위장 리빌 — 진화 못 하는 메타몽이 첫 진화 순간 정체를 드러낸다.
@@ -881,7 +881,7 @@ struct L {
     var freshEggShinyWarning: String { t("⚠️ 이로치 포켓몬이에요! 정말 놓아줄까요?", "⚠️ This one is shiny! Really send it off?", "⚠️ 色違いです！本当に手放しますか？", "⚠️ ¡Este es variocolor! ¿Seguro que quieres soltarlo?", "⚠️ Celui-ci est chromatique ! Vraiment le laisser partir ?", "⚠️ Esse é shiny! Quer mesmo soltar?", "⚠️ Dieses Pokémon ist schillernd! Wirklich verabschieden?") }
     var freshEggDiscardShiny: String { t("이로치 놓아주기", "Send shiny off", "手放す", "Soltar variocolor", "Laisser partir le chromatique", "Soltar o shiny", "Schillerndes Pokémon verabschieden") }
 
-    // MARK: 사탕 획득 알림 ("왜 받는지" = 토큰 한도를 다 채운 수고에 대한 보상)
+    // MARK: 사탕 획득 알림 ("왜 받는지" = 한도 창에 토큰을 쌓아온 수고에 대한 보상 — 임계 40·80·100%)
     func notifCandyTitle(item: String, count: Int) -> String {
         t("🍬 \(item) \(count)개를 받았어요!",
           "🍬 You got \(count)× \(item)!",
@@ -891,13 +891,23 @@ struct L {
           "🍬 Você ganhou \(count)× \(item)!",
           "🍬 Du hast \(count)× \(item) erhalten!")
     }
-    func notifCandyBody(window: String) -> String {
-        t("\(window) 토큰 한도를 다 채웠어요. 열심히 쓴 만큼 사탕을 드려요 — 포켓몬에게 써서 진화시켜 보세요!",
-          "You maxed out your \(window) token limit. A treat for the effort — use it to evolve your Pokémon!",
-          "\(window)のトークン上限を使い切りました。がんばったごほうびです — ポケモンに使って進化させよう！",
-          "Has agotado tu límite de tokens \(window). Un premio por el esfuerzo — ¡úsalo para evolucionar a tu Pokémon!",
-          "Tu as atteint ta limite de tokens \(window). Une récompense pour l'effort — utilise-la pour faire évoluer ton Pokémon !",
-          "Você esgotou seu limite de tokens — \(window). Você merece um agrado: use no seu Pokémon para evoluir!",
-          "Du hast das Token-Limit für \(window) ausgeschöpft. Eine Belohnung für deinen Einsatz – verwende sie, um dein Pokémon zu entwickeln!")
+    /// `percent` = 이 지급으로 새로 도달한 임계(40·80·100). 100%는 "다 채웠다", 그 외엔 "여기까지 왔다".
+    func notifCandyBody(window: String, percent: Int) -> String {
+        if percent >= 100 {
+            return t("\(window) 토큰 한도를 다 채웠어요. 열심히 쓴 만큼 사탕을 드려요 — 포켓몬에게 써서 진화시켜 보세요!",
+                     "You maxed out your \(window) token limit. A treat for the effort — use it to evolve your Pokémon!",
+                     "\(window)のトークン上限を使い切りました。がんばったごほうびです — ポケモンに使って進化させよう！",
+                     "Has agotado tu límite de tokens \(window). Un premio por el esfuerzo — ¡úsalo para evolucionar a tu Pokémon!",
+                     "Tu as atteint ta limite de tokens \(window). Une récompense pour l'effort — utilise-la pour faire évoluer ton Pokémon !",
+                     "Você esgotou seu limite de tokens — \(window). Você merece um agrado: use no seu Pokémon para evoluir!",
+                     "Du hast das Token-Limit für \(window) ausgeschöpft. Eine Belohnung für deinen Einsatz – verwende sie, um dein Pokémon zu entwickeln!")
+        }
+        return t("\(window) 토큰 한도의 \(percent)%까지 썼어요. 열심히 쓴 만큼 사탕을 드려요 — 포켓몬에게 써서 진화시켜 보세요!",
+                 "You've used \(percent)% of your \(window) token limit. A treat for the effort — use it to evolve your Pokémon!",
+                 "\(window)のトークン上限の\(percent)%まで使いました。がんばったごほうびです — ポケモンに使って進化させよう！",
+                 "Has usado el \(percent)% de tu límite de tokens \(window). Un premio por el esfuerzo — ¡úsalo para evolucionar a tu Pokémon!",
+                 "Tu as utilisé \(percent)% de ta limite de tokens \(window). Une récompense pour l'effort — utilise-la pour faire évoluer ton Pokémon !",
+                 "Você usou \(percent)% do seu limite de tokens \(window). Você merece um agrado: use no seu Pokémon para evoluir!",
+                 "Du hast \(percent)% deines Token-Limits für \(window) verbraucht. Eine Belohnung für deinen Einsatz – verwende sie, um dein Pokémon zu entwickeln!")
     }
 }

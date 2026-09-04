@@ -105,19 +105,19 @@ enum Rarity: String, Codable, Sendable {
     }
 }
 
-/// 토큰 경제 — 실측 평균(~253M/일) 기준.
+/// 토큰 경제 — 실측 평균(~253M/일)의 1/10 스케일(빠른 성장 사이클).
 /// 졸업 총량 T 는 같은 희귀도면 진화 단계 수와 무관하게 동일.
 /// 형태 k개 라인에서 i번째 형태 성장 비용 = T·i / (k(k+1)/2) → 합 = T, 단계↑일수록 비용↑.
 enum PokemonBalance {
     /// 알 부화 임계 — 이만큼 토큰을 써야 알이 깨진다(즉시 부화 대신 기대감). 초과분은 부화체 성장에 이월.
-    static let eggHatchThreshold = 5_000_000
+    static let eggHatchThreshold = 500_000
 
     static func graduationTotal(_ rarity: Rarity) -> Int {
         switch rarity {
-        case .common:    return    750_000_000
-        case .uncommon:  return  1_875_000_000
-        case .rare:      return  3_000_000_000
-        case .legendary: return  6_000_000_000
+        case .common:    return   75_000_000
+        case .uncommon:  return  187_500_000
+        case .rare:      return  300_000_000
+        case .legendary: return  600_000_000
         }
     }
     /// stageIndex(0-based)에서 다음 단계/졸업까지 필요한 토큰.
@@ -171,30 +171,41 @@ enum ItemKind: String, Codable, Sendable, CaseIterable {
 
 /// 이상한 사탕 밸런스 상수.
 enum RareCandy {
-    /// 사용 시 현재 포켓몬에 주입하는 XP(토큰 환산). 최소 진화 임계(커먼 1형태 125M)보다 작아
+    /// 사용 시 현재 포켓몬에 주입하는 XP(토큰 환산). 최소 진화 임계(커먼 3형태 첫 단계 12.5M)보다 작아
     /// 사탕 1개는 최대 1단계만 올린다(연쇄·졸업 폭주 없음). applyUsage 로 주입 → 이월/진화/졸업 자동.
-    static let xp = 100_000_000
-    /// 주간 한도 100% 도달 시 지급 개수(세션급은 1개).
-    static let weeklyGrant = 5
-    /// 상점 구매가(재화 = 사용한 토큰: usedSinceInstall − spentTokens). XP 값어치(100M)의 5배.
+    static let xp = 10_000_000
+    /// 사탕 지급 임계(창 utilization %, 오름차순) — 창이 각 값을 **새로 넘어서는** 순간 1회씩 지급.
+    /// 100%만이 아니라 사용이 쌓이는 도중에도 보상해 사탕이 "빨리 도착"하게 한다. 한 refresh 에서
+    /// 여러 임계를 한꺼번에 넘으면 그 사이 임계들의 지급분을 합산한다(evaluateCandyGrants).
+    static let grantThresholds: [Double] = [40, 80, 100]
+    /// 임계별 지급 개수 — `grantThresholds` 와 같은 길이·순서. 세션급 창 / 주간급 창.
+    /// 주간 누계 10개(2+3+5)는 세대(졸업) 속도를 크게 흔들지 않는 선에서 "빨리 자란다"를 만든다.
+    static let sessionThresholdGrants = [1, 1, 1]
+    static let weeklyThresholdGrants  = [2, 3, 5]
+
+    /// 창 분류별 임계 지급표.
+    static func thresholdGrants(for kind: WindowClass) -> [Int] {
+        kind == .weekly ? weeklyThresholdGrants : sessionThresholdGrants
+    }
+    /// 상점 구매가(재화 = 사용한 토큰: usedSinceInstall − spentTokens). XP 값어치(10M)의 5배.
     /// 토큰이 "성장 미터 + 상점 지갑"으로 이중 사용되는 구조라, 가격을 XP 와 같게 두면 구매가 사실상
-    /// 공짜 추가성장(150M 써서 250M 성장)이 된다. 500M 로 두면 그 값 모으는 500M 패시브 성장 + 사탕
-    /// 100M = 실질 보너스 +20% 로 억제된다. 무료 획득(한도 100% 보상)이 항상 이득이도록 값어치보다 비싸게.
-    static let price = 500_000_000
+    /// 공짜 추가성장(15M 써서 25M 성장)이 된다. 50M 로 두면 그 값 모으는 50M 패시브 성장 + 사탕
+    /// 10M = 실질 보너스 +20% 로 억제된다. 무료 획득(한도 100% 보상)이 항상 이득이도록 값어치보다 비싸게.
+    static let price = 50_000_000
 }
 
 /// 민트 밸런스 상수.
 enum Mint {
     /// 상점 구매가. 성격 변경은 순수 코스메틱(성장·능력치 무관)이라 밸런스 근거가 없어 "느낌" 값 —
-    /// 사탕(500M)의 1/5로 싸게 둬서 성격을 마음에 들 때까지 굴려보는 가벼운 재미. 성장을 안 줘서
+    /// 사탕(50M)의 1/5로 싸게 둬서 성격을 마음에 들 때까지 굴려보는 가벼운 재미. 성장을 안 줘서
     /// 이중계산 이슈도 없음(가격 = 순수 소비).
-    static let price = 100_000_000
+    static let price = 10_000_000
 }
 
 /// 이로치 부적 밸런스 상수 — 보유형(1회 구매·영구, 소비 안 됨).
 enum ShinyCharm {
-    /// 상점 구매가. 앞으로의 모든 부화에 적용되는 영구 럭 업그레이드라 프리미엄(레어 1마리 졸업분=3B).
-    static let price = 3_000_000_000
+    /// 상점 구매가. 앞으로의 모든 부화에 적용되는 영구 럭 업그레이드라 프리미엄(레어 1마리 졸업분=300M).
+    static let price = 300_000_000
     /// 보유 시 이로치 부화 확률 분모 — 1/64 → 1/48 (+33%). 본가 '반짝이 부적'(이로치 확률↑) 오마주.
     /// ×2(1/32)는 과해 절제. 이미 부화한 개체엔 소급 없음(이로치는 부화 순간 확정).
     static let shinyDenominator: UInt64 = 48
@@ -204,8 +215,8 @@ enum ShinyCharm {
 enum FreshEgg {
     /// 상점 구매가. 마음에 안 드는 부화를 리롤하는 프리미엄(쌓인 토큰의 활용처). 폐기 개체는 졸업이
     /// 아니라 그냥 사라지므로 도감·확률(collectedFinals)에 무영향 — "뽑은 적 없던 것처럼". 새 알은
-    /// 처음부터 재인큐베이션(5M) 필요 + 성장(usedAtStage) 소멸이라 스팸/파밍이 자연 억제된다.
-    static let price = 1_000_000_000
+    /// 처음부터 재인큐베이션(500K) 필요 + 성장(usedAtStage) 소멸이라 스팸/파밍이 자연 억제된다.
+    static let price = 100_000_000
 
     /// 상점에서 파는 알 — 보증 없음(기본) → 고급 이상 → 희귀 이상. `nil` = 등급 보증 없는 기존 알.
     /// **전설 전용 알은 팔지 않는다**(등급 하한을 capture_rate 로 표현할 수 없고, 최고 등급을 확정
@@ -213,12 +224,12 @@ enum FreshEgg {
     static let shopTiers: [Rarity?] = [nil, .uncommon, .rare]
 
     /// 등급 보증 알의 가격 — 배율은 새 상수를 짓지 않고 **기존 졸업 총량 표**를 그대로 쓴다
-    /// (common 750M : uncommon 1.875B : rare 3B = 1 : 2.5 : 4 → 1B / 2.5B / 4B).
+    /// (common 75M : uncommon 187.5M : rare 300M = 1 : 2.5 : 4 → 100M / 250M / 400M).
     ///
     /// 확률 배율(고급 7.16% : 희귀 6.98% ≈ 1 : 2.03)로 매기면 안 된다 — 그러면 같은 값으로 고급 알
     /// 2개를 사는 쪽이 희귀+ 기대 1.039마리·전설 0.104마리로 희귀 알 1개(1.000·0.100)를 모든 축에서
-    /// 앞질러 상위 티어가 완전 열등재가 된다. 졸업량 배율이라야 상위 티어가 희귀+ 1마리당 4.00B 로
-    /// 하위 반복 구매(4.81B)보다 싸다.
+    /// 앞질러 상위 티어가 완전 열등재가 된다. 졸업량 배율이라야 상위 티어가 희귀+ 1마리당 400M 로
+    /// 하위 반복 구매(481M)보다 싸다.
     static func price(guaranteeing tier: Rarity?) -> Int {
         guard let tier else { return price }
         let multiplier = Double(PokemonBalance.graduationTotal(tier)) / Double(PokemonBalance.graduationTotal(.common))
@@ -241,14 +252,14 @@ enum ShopEntry: Hashable, Sendable {
     }
 }
 
-/// 사탕 지급 대상 한도 창의 분류 — session=1개·weekly=weeklyGrant.
+/// 사탕 지급 대상 한도 창의 분류 — 임계별 지급표가 갈린다(`RareCandy.thresholdGrants(for:)`).
 enum WindowClass: Sendable { case session, weekly }
 
 /// 사탕 지급 판정 입력 — 프로바이더 무관 한도 창 1개. (UsageStore.candyEligibleWindows 가 생성)
 struct CandyWindow: Sendable {
     let key: String          // 안정 식별자(tier 추적) — resets_at 등 휘발 필드 금지
     let name: String         // 표시용(알림 "왜 받는지")
-    let kind: WindowClass    // session=1개 · weekly=5개
+    let kind: WindowClass    // 임계별 지급 개수 결정
     let utilization: Double  // 0~100+
 }
 
@@ -257,6 +268,7 @@ struct CandyGrant: Equatable, Sendable {
     let windowKey: String
     let windowName: String   // 알림 "왜 받는지"
     let count: Int
+    let milestonePercent: Int  // 이 지급으로 새로 도달한 가장 높은 임계(알림 문구 — 40·80·100%)
 }
 
 /// 현재 서비스가 제공하는 움직이는 포켓몬 스프라이트 범위.
@@ -566,9 +578,9 @@ struct CompanionState: Codable, Sendable {
     var language: AppLanguage = .systemDefault   // 신규 설치 = 시스템 로케일
     // 인벤토리 (ItemKind.rawValue → 개수)
     var inventory: [String: Int] = [:]
-    // 사탕 지급 엣지 상태(창 key → 지급한 tier). ★영속 — notifiedTier(인메모리)와 달리 재시작 무한지급 방지.
+    // 사탕 지급 엣지 상태(창 key → 넘은 임계 개수 0…3). ★영속 — notifiedTier(인메모리)와 달리 재시작 무한지급 방지.
     var candyGrantTier: [String: Int] = [:]
-    // 사탕 지급 첫 실행 시드 완료 — 업데이트 직후 이미 100%였던 창의 소급 지급 차단.
+    // 사탕 지급 첫 실행 시드 완료 — 업데이트 직후 이미 임계(40·80·100%) 위였던 창의 소급 지급 차단.
     var candyFeatureSeeded = false
 
     init() {}

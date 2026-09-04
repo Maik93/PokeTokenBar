@@ -74,7 +74,7 @@ final class PremiumEggTests: XCTestCase {
     private func activeStore(used: Int = 20_000_000_000, provider: any PokeProviding = TieredProvider(),
                              at file: URL? = nil) -> CompanionStore {
         let f = file ?? url()
-        let mon = "{\"baseID\":10,\"pathIDs\":[10],\"stageIndex\":0,\"usedAtStage\":200000000,"
+        let mon = "{\"baseID\":10,\"pathIDs\":[10],\"stageIndex\":0,\"usedAtStage\":20000000,"
             + "\"rarity\":\"common\",\"totalForms\":3,\"isShiny\":false}"
         let json = "{\"installBaselineSet\":true,\"usedSinceInstall\":\(used),\"spentTokens\":0,"
             + "\"lastDate\":\"d\",\"active\":\(mon),\"dex\":[],\"collectedFinals\":[]}"
@@ -124,9 +124,9 @@ final class PremiumEggTests: XCTestCase {
     // MARK: 가격 — 졸업 총량 배율(새 상수 금지)
 
     func testPricesFollowGraduationTotalRatio() {
-        XCTAssertEqual(FreshEgg.price(guaranteeing: nil), 1_000_000_000)
-        XCTAssertEqual(FreshEgg.price(guaranteeing: .uncommon), 2_500_000_000)
-        XCTAssertEqual(FreshEgg.price(guaranteeing: .rare), 4_000_000_000)
+        XCTAssertEqual(FreshEgg.price(guaranteeing: nil), 100_000_000)
+        XCTAssertEqual(FreshEgg.price(guaranteeing: .uncommon), 250_000_000)
+        XCTAssertEqual(FreshEgg.price(guaranteeing: .rare), 400_000_000)
         XCTAssertEqual(FreshEgg.shopTiers, [nil, .uncommon, .rare])
     }
 
@@ -201,7 +201,7 @@ final class PremiumEggTests: XCTestCase {
 
     /// 잔액이 그 **티어의** 가격에 미달이면 불가 — 기본 알은 살 수 있어도 희귀 알은 못 산다.
     func testFundsAreCheckedAgainstTierPrice() {
-        let s = activeStore(used: 3_000_000_000)   // 1B·2.5B 는 되고 4B 는 안 되는 잔액
+        let s = activeStore(used: 300_000_000)   // 100M·250M 는 되고 400M 는 안 되는 잔액
         XCTAssertTrue(s.canBuyEgg(nil))
         XCTAssertTrue(s.canBuyEgg(.uncommon))
         XCTAssertFalse(s.canBuyEgg(.rare))
@@ -261,7 +261,7 @@ final class PremiumEggTests: XCTestCase {
     /// 고급 알은 common **만** 배제한다 — 고급·희귀·전설은 모두 정상 결과다(전설 포함이 의도).
     ///
     /// `r != .common` 만 보면 **과잉 필터**를 못 잡는다: 두 롤 경로가 `tier` 를 무시하고 늘 희귀로
-    /// 걸러도 이 단언은 통과하고, 그러면 2.5B 고급 알과 4B 희귀 알의 풀이 같아져 희귀 알이 완전
+    /// 걸러도 이 단언은 통과하고, 그러면 250M 고급 알과 400M 희귀 알의 풀이 같아져 희귀 알이 완전
     /// 열등재가 된다(가격 근거가 통째로 무너지는데 테스트는 초록). 그래서 **고급이 실제로 나오는지**를
     /// 함께 못박는다 — 산 티어가 그대로 필터에 전달된다는 증거.
     func testUncommonEggHatchesUncommonAndExcludesOnlyCommon() async {
@@ -417,7 +417,7 @@ final class PremiumEggTests: XCTestCase {
         XCTAssertNotNil(s.state.active, "알이 정상적으로 부화해야 한다(벽돌 상태 아님)")
     }
 
-    /// 판매 목록에 없는 티어는 살 수 없다 — 가격만 계산되면(전설 8B) 호출부 하나가 실수했을 때 토큰이
+    /// 판매 목록에 없는 티어는 살 수 없다 — 가격만 계산되면(전설 800M) 호출부 하나가 실수했을 때 토큰이
     /// 통째로 사라지고 그 알은 영영 안 깨진다.
     func testCannotBuyTierThatIsNotSold() {
         let s = activeStore()

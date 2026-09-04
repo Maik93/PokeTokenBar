@@ -783,7 +783,7 @@ final class CompanionStore {
         state.reconcileRepresentativeSelection()
         activeGeneration += 1
         currentLine = nil
-        state.eggUsage = 0            // 새 알은 처음부터 인큐베이션(재부화에 5M 필요)
+        state.eggUsage = 0            // 새 알은 처음부터 인큐베이션(재부화에 500K 필요)
         state.eggTier = tier          // 등급 보증(nil = 보증 없음)
         state.pendingHatchID = nil    // 새 보증으로 처음부터 롤(활성 포켓몬이 있는 동안엔 원래 비어 있다)
         prefetchedLineID = nil
@@ -799,36 +799,48 @@ final class CompanionStore {
     @discardableResult
     func buyFreshEgg() -> Bool { buyEgg(nil) }
 
-    /// 지급 판정(순수·엣지 트리거) — 한도 창이 100% 를 새로 넘어선 순간에만 지급.
-    /// - 100% 미만 → 맵에서 제거(재무장). resets_at 등 휘발 필드는 key 에 없다(안정 식별자만).
-    /// - 이미 지급한 창(tier≥1)은 재지급 안 함. session=1개·weekly=weeklyGrant.
+    /// 지급 판정(순수·엣지 트리거) — 창 utilization 이 `RareCandy.grantThresholds`(40·80·100%) 의
+    /// 각 값을 **새로 넘어선** 순간에만 지급. tier = 현재까지 넘은 임계 개수(0…3).
+    /// - 최저 임계 미만 → 맵에서 제거(재무장). resets_at 등 휘발 필드는 key 에 없다(안정 식별자만).
+    /// - tier 하강(창 리셋 진행 등)은 지급 없이 tier 만 낮춰 재무장.
+    /// - 한 refresh 에서 여러 임계를 한꺼번에 넘으면 그 사이 임계들의 지급분을 합산(count),
+    ///   milestone 은 그 중 최고 임계. 지급표는 창 분류별(`RareCandy.thresholdGrants(for:)`).
     /// - 부수효과(인벤토리·알림)와 분리해 xctest 가능. (evaluateLimitAlerts 자매)
     static func evaluateCandyGrants(
         windows: [CandyWindow], grantTier: inout [String: Int]
     ) -> [CandyGrant] {
+        let thresholds = RareCandy.grantThresholds
         var grants: [CandyGrant] = []
         for w in windows {
-            guard w.utilization >= 100 else { grantTier[w.key] = nil; continue }
-            let previous = grantTier[w.key] ?? 0
-            guard previous < 1 else { continue }
-            grantTier[w.key] = 1
-            let count = w.kind == .weekly ? RareCandy.weeklyGrant : 1
-            grants.append(CandyGrant(windowKey: w.key, windowName: w.name, count: count))
+            let reached = thresholds.filter { w.utilization >= $0 }.count
+            guard reached > 0 else { grantTier[w.key] = nil; continue }
+            // 세이브 병합으로 들어온 stale 큰 값(구버전 tier=1 은 "100% 도달" 의미)도 임계 개수로 클램프.
+            let previous = min(grantTier[w.key] ?? 0, thresholds.count)
+            grantTier[w.key] = reached   // 정규화 + 재무장(하강 포함) — 항상 현재 도달 tier 로.
+            guard reached > previous else { continue }   // 동일·하강은 지급 없음
+            let table = RareCandy.thresholdGrants(for: w.kind)
+            let count = table[min(previous, table.count)..<min(reached, table.count)].reduce(0, +)
+            grants.append(CandyGrant(windowKey: w.key, windowName: w.name, count: count,
+                                     milestonePercent: Int(thresholds[reached - 1])))
         }
         return grants
     }
 
     /// 한도 창 상태로부터 사탕 지급(엣지·영속). AppDelegate 가 매 refresh 완료 시(한도 로드 후) 호출.
-    /// - 첫 실행: 현재 100% 창을 지급 없이 tier 시드만 → 이후 "새로 넘어서는" 순간부터 지급(소급 차단).
+    /// - 첫 실행: 이미 임계(40·80·100%)를 넘은 창을 지급 없이 tier 시드만 → 이후 "새로 넘어서는"
+    ///   순간부터 지급(소급 차단).
     /// - limitsReady=false(한도 미로딩)면 시드/지급 모두 대기(다음 refresh 에 재시도).
     func grantCandies(from windows: [CandyWindow], limitsReady: Bool) {
         guard limitsReady else { return }
         if !state.candyFeatureSeeded {
             // 한계(수용): 첫 refresh 에 한 프로바이더 한도만 로드되면 그 프로바이더 창만 시드된다.
-            // 이후 다른 프로바이더가 이미 100%인 채 로드되면 소급 지급될 수 있으나, 1회·소수 캔디라
+            // 이후 다른 프로바이더가 이미 임계 위인 채 로드되면 소급 지급될 수 있으나, 1회·소수 캔디라
             // 1인 로컬에서 무시(YAGNI). refresh() 는 전 프로바이더 fetch 를 await 후 onRefresh 하므로
             // 정상 경로(둘 다 성공)에선 원자적 시드다.
-            for w in windows where w.utilization >= 100 { state.candyGrantTier[w.key] = 1 }
+            for w in windows {
+                let reached = RareCandy.grantThresholds.filter { w.utilization >= $0 }.count
+                if reached > 0 { state.candyGrantTier[w.key] = reached }
+            }
             state.candyFeatureSeeded = true
             save()
             return
@@ -837,12 +849,12 @@ final class CompanionStore {
         let grants = Self.evaluateCandyGrants(windows: windows, grantTier: &state.candyGrantTier)
         for g in grants {
             state.inventory[ItemKind.rareCandy.rawValue, default: 0] += g.count
-            // 지급 자체는 알림 여부와 무관(상태 변경). 알림은 "왜 받는지"(그 창 한도를 다 채운 수고) 명시.
+            // 지급 자체는 알림 여부와 무관(상태 변경). 알림은 "왜 받는지"(그 창에 쌓인 사용량) 명시.
             notifyCompanionEvent(l.notifCandyTitle(item: l.itemName(.rareCandy), count: g.count),
-                                 l.notifCandyBody(window: g.windowName))
+                                 l.notifCandyBody(window: g.windowName, percent: g.milestonePercent))
         }
-        // 지급이 없어도 재무장(창이 100%→아래로 내려가며 grantTier 에서 제거)은 영속해야 한다 —
-        // 안 하면 재시작 시 stale tier=1 로 다음 100% 도달이 "이미 지급"으로 오판돼 지급 누락(회귀).
+        // 지급이 없어도 재무장(창이 최저 임계 아래로 내려가며 grantTier 에서 제거·tier 하강)은 영속해야
+        // 한다 — 안 하면 재시작 시 stale tier 로 다음 임계 도달이 "이미 지급"으로 오판돼 지급 누락(회귀).
         if !grants.isEmpty || state.candyGrantTier != before { save() }
     }
 
@@ -1056,7 +1068,7 @@ final class CompanionStore {
         notifyCompanionEvent(shiny ? l.notifShinyDittoRevealTitle : l.notifDittoRevealTitle,
                              shiny ? l.notifShinyDittoRevealBody(disguiseName) : l.notifDittoRevealBody(disguiseName))
         save()
-        applyUsage(0)   // 이월분으로 메타몽 졸업 재평가(rare 3B라 보통 즉시 졸업 아님)
+        applyUsage(0)   // 이월분으로 메타몽 졸업 재평가(rare 300M라 보통 즉시 졸업 아님)
     }
 
     private func loadCurrentLine() async {

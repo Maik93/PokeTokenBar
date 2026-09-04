@@ -95,7 +95,8 @@ final class LocalizationInterpolationTests: XCTestCase {
             expect(lang, "notifGraduateBody", l.notifGraduateBody(a), a)
             expect(lang, "notifBody", l.notifBody(a, b), a, b)
             expect(lang, "notifCandyTitle", l.notifCandyTitle(item: a, count: 4242), a, "4242")
-            expect(lang, "notifCandyBody", l.notifCandyBody(window: a), a)
+            expect(lang, "notifCandyBody(100)", l.notifCandyBody(window: a, percent: 100), a)
+            expect(lang, "notifCandyBody(80)", l.notifCandyBody(window: a, percent: 80), a, "80")
 
             // Updates / 업데이트
             expect(lang, "updateAvailable", l.updateAvailable(a, current: b), a, b)

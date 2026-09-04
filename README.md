@@ -40,7 +40,7 @@ PokeTokenBar turns the AI coding tokens you're already burning — Claude Code, 
 2. 🐣 **Hatch.** Eggs hatch into Pokémon with real evolution lines from [PokéAPI](https://pokeapi.co/) — any Gen 1–5 line (329 possible starts), weighted by the official capture rate: commons hatch often, a legendary is a 1-in-129 event. It appears in your **Pokédex** immediately while you raise it. Every hatch rolls one of 25 natures — and once in a rare while, the egg hatches **✨ Shiny**.
 3. ⚡ **Evolve.** Keep coding and it grows through its actual evolution tree (1/2/3 stages, branching), with a little flash celebration at each step.
 4. 🎓 **Graduate & collect.** Final form + threshold permanently archives it in your **Pokédex** — rarer takes longer (≈3 days common → ≈24 days legendary at heavy use) — and a fresh egg arrives.
-5. 🍬 **Max out, get a candy.** Fill a 5-hour or weekly usage limit and you earn **Rare Candy** — spend it from the **Bag** to grow your current Pokémon.
+5. 🍬 **Burn through a limit, get candy.** As you use up a 5-hour or weekly usage limit — at 40%, 80% and 100% — you earn **Rare Candy** to spend from the **Bag** and grow your current Pokémon.
 6. 🛒 **Spend at the Shop.** Every token you've used is spendable currency — buy **Rare Candy**, a **Mint** that re-rolls your Pokémon's nature, a **Shiny Charm** that permanently raises your shiny odds, or an egg to send off your current companion and start over. Eggs come in three grades: a plain **Pokémon Egg**, an **Uncommon Egg** guaranteed to hatch Uncommon or better, and a **Rare Egg** guaranteed to hatch Rare or better.
 
 ## Tour
@@ -83,8 +83,8 @@ Menu-bar items, refresh interval (1–15 min or manual), launch at login, a Keyc
 </tr>
 <tr>
 <td width="55%" valign="middle">
-<h3>🍬 Fill a limit, earn a Rare Candy</h3>
-Max out a 5-hour or weekly usage limit and you're handed a <b>Rare Candy</b> — one per 5-hour cap, five per weekly. Spend it from the new <b>Bag</b> tab to grow your current Pokémon: the moment you're rate-limited becomes the moment you level up.
+<h3>🍬 Burn through a limit, earn Rare Candy</h3>
+As you use up a 5-hour or weekly usage limit you're handed <b>Rare Candy</b> at 40%, 80% and 100% — three per 5-hour cap, ten per weekly. Spend it from the new <b>Bag</b> tab to grow your current Pokémon: heavy usage becomes steady growth, and hitting the wall still pays out most.
 </td>
 <td width="45%" align="center"><img src="assets/screenshot-bag.png" width="300" alt="Rare Candy and Mint in the Bag"></td>
 </tr>
