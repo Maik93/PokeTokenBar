@@ -2,9 +2,11 @@
 
 <img src="assets/icon.png" width="128" alt="PokeTokenBar icon">
 
-# PokeTokenBar
+# PokeTokenBar - a faster fork
 
 **Your AI coding tokens, hatched into Pokémon — right in your menu bar.**
+
+**FORK DIFFERENCES: x10 faster than the official repo, and with reset hours wall clocks.**
 
 [![Release](https://img.shields.io/github/v/release/chattymin/PokeTokenBar?color=444d56&label=release)](https://github.com/chattymin/PokeTokenBar/releases)
 [![macOS](https://img.shields.io/badge/macOS-14%2B-0969da)](https://www.apple.com/macos/)
